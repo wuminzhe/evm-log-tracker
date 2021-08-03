@@ -10,19 +10,17 @@ pub struct Bsc;
 impl EvmChain for Bsc {
     const NAME: &'static str = "Bsc";
 
-    async fn next_range(from: u64, client: &EvmClient) -> Result<(u64, u64)> {
+    async fn next_range(from: u64, step: u64, client: &EvmClient) -> Result<(u64, u64)> {
+        // if step > 5000 {
+        //     Err()
+        // }
         let latest = client.get_latest_block_number().await?;
-        let to = if from + 5000 >= latest {
-            latest
-        } else {
-            from + 5000
-        };
-        if to - from > 5 {
-            let result = (from, to);
-            Ok(result)
-        } else {
+        let to = from + step;
+        if to > latest { // 走的太快了
             sleep(Duration::from_secs(30)).await;
-            Bsc::next_range(from, client).await
+            Bsc::next_range(from, step, client).await
+        } else {
+            Ok((from, to))
         }
     }
 }

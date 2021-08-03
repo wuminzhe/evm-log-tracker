@@ -1,41 +1,43 @@
-use crate::default_logs_handler::DefaultLogsHandler;
 use crate::{EvmChain, EvmClient, LogsHandler, Result};
 use std::marker::PhantomData;
 use std::time::Duration;
 use tokio::time::sleep;
-use web3::{
-    transports::Http,
-    types::{Log, H160, H256},
-    Web3,
-};
+use web3::types::{Log, H160, H256};
 
 pub struct EvmLogTracker<C: EvmChain, H: LogsHandler> {
     client: EvmClient,
-    topics_list: Vec<(H160, Vec<H256>)>,
+    topics_list: Vec<(Option<H160>, Vec<H256>)>,
     logs_handler: H,
     from: u64,
-    stop: bool,
+    step: u64,
+    step_in_secs: u64,
+    running: bool,
     phantom: PhantomData<C>,
 }
 
 impl<C: EvmChain, H: LogsHandler> EvmLogTracker<C, H> {
     pub fn new(
         client: EvmClient,
-        topics_list: Vec<(H160, Vec<H256>)>,
+        topics_list: Vec<(Option<H160>, Vec<H256>)>,
         logs_handler: H,
         from: u64,
+        step: u64,
+        step_in_secs: u64,
     ) -> Self {
         EvmLogTracker {
             client,
             topics_list,
             logs_handler,
             from,
-            stop: false,
+            step,
+            step_in_secs,
+            running: false,
             phantom: PhantomData,
         }
     }
 
     pub async fn start(&mut self) {
+        self.running = true;
         loop {
             match self.next().await {
                 Err(err) => {
@@ -49,14 +51,16 @@ impl<C: EvmChain, H: LogsHandler> EvmLogTracker<C, H> {
                 }
             }
 
-            if self.stop == true {
+            if self.running == false {
                 break;
             }
+
+            sleep(Duration::from_secs(self.step_in_secs)).await;
         }
     }
 
     pub fn stop(&mut self) {
-        self.stop = true;
+        self.running = false;
     }
 
     pub async fn next(&mut self) -> Result<Vec<Log>> {
@@ -69,14 +73,14 @@ impl<C: EvmChain, H: LogsHandler> EvmLogTracker<C, H> {
             to
         );
         for topics in &self.topics_list {
-            let logs = self.client.get_logs(&topics.0, &topics.1, from, to).await?;
+            let logs = self.client.get_logs(topics.0.clone(), topics.1.clone(), from, to).await?;
             result.extend_from_slice(&logs);
         }
         Ok(result)
     }
 
     async fn next_range(&mut self) -> Result<(u64, u64)> {
-        let range = C::next_range(self.from, &self.client).await?;
+        let range = C::next_range(self.from, self.step, &self.client).await?;
         self.from = range.1;
         Ok(range)
     }
